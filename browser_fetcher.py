@@ -11,6 +11,7 @@ import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -114,6 +115,9 @@ def _scrape_site(target: dict) -> list[dict]:
             continue
 
         url = target["base_url"] + href if href.startswith("/") else href
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            continue  # discard malformed or non-HTTP URLs
         date = _extract_date(_nearby_text(a))
 
         articles.append({

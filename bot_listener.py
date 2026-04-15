@@ -11,6 +11,7 @@ setup.ps1 registers this automatically as "Robotics Digest Listener".
 
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -22,8 +23,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
-# Comma-separated Telegram user IDs allowed to trigger /scrape via private DM.
-# Group chat access is controlled by group membership, not this list.
+# Comma-separated Telegram user IDs allowed to trigger /scrape from any chat
+# (group or private DM). Both must appear in this list.
 _raw = os.environ.get("ALLOWED_USER_IDS", "")
 ALLOWED_USER_IDS: set[int] = {int(uid.strip()) for uid in _raw.split(",") if uid.strip()}
 
@@ -79,6 +80,8 @@ def _handle(update: dict, token: str, group_chat_id: str) -> None:
 
     # Accept /scrape only from whitelisted users, in either the group chat or a private DM
     sender_id = msg.get("from", {}).get("id")
+    if sender_id is None:
+        return  # channel post or service message — silently ignore
     if sender_id not in ALLOWED_USER_IDS:
         logger.warning("Ignored /scrape from unauthorised user %s", sender_id)
         return
@@ -86,6 +89,9 @@ def _handle(update: dict, token: str, group_chat_id: str) -> None:
         return
 
     if text.startswith("/scrape"):
+        if not re.fullmatch(r"-?\d+", msg_chat_id):
+            logger.error("Unexpected chat_id format: %s — ignoring /scrape", msg_chat_id)
+            return
         logger.info("Received /scrape from chat %s (%s)", msg_chat_id, chat_type)
         _send(token, msg_chat_id, "Fetching fresh articles — this takes about a minute...")
         try:
@@ -103,9 +109,8 @@ def _handle(update: dict, token: str, group_chat_id: str) -> None:
             return
 
         if result.returncode != 0:
-            logger.error(
-                "on-demand run failed (exit %d):\n%s", result.returncode, result.stderr[:500]
-            )
+            safe_stderr = result.stderr[:500].replace(token, "<REDACTED>")
+            logger.error("on-demand run failed (exit %d):\n%s", result.returncode, safe_stderr)
             _send(token, msg_chat_id, "Scrape failed — check digest.log for details.")
 
 
@@ -117,6 +122,9 @@ def main() -> None:
         raise RuntimeError("TELEGRAM_BOT_TOKEN not set in .env")
     if not chat_id:
         raise RuntimeError("TELEGRAM_CHAT_ID not set in .env")
+
+    if not ALLOWED_USER_IDS:
+        logger.warning("ALLOWED_USER_IDS is empty — /scrape will be blocked for everyone. Set it in .env.")
 
     logger.info("Bot listener started. Polling for /scrape in group %s + private DMs.", chat_id)
 

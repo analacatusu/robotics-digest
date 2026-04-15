@@ -11,6 +11,7 @@ Usage:
 
 import argparse
 import logging
+import re
 import sys
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
@@ -98,6 +99,9 @@ def main() -> None:
     parser.add_argument("--on-demand", action="store_true", help="Send only articles not in today's morning digest")
     parser.add_argument("--chat-id", default=None, help="Override TELEGRAM_CHAT_ID for this run (used for DM replies)")
     args = parser.parse_args()
+
+    if args.chat_id and not re.fullmatch(r"-?\d+", args.chat_id):
+        parser.error(f"--chat-id must be a numeric Telegram chat ID, got: {args.chat_id!r}")
 
     try:
         run(dry_run=args.dry_run, force=args.force, on_demand=args.on_demand, chat_id=args.chat_id)

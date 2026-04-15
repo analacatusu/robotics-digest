@@ -36,7 +36,7 @@ def _prune(data: dict[str, str]) -> dict[str, str]:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)).strftime("%Y-%m-%d")
     return {
         url: date for url, date in data.items()
-        if date and len(date) == 10 and date >= cutoff
+        if isinstance(date, str) and len(date) == 10 and date >= cutoff
     }
 
 
