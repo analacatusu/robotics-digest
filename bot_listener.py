@@ -77,14 +77,12 @@ def _handle(update: dict, token: str, group_chat_id: str) -> None:
     msg_chat_id = str(msg.get("chat", {}).get("id", ""))
     chat_type = msg.get("chat", {}).get("type", "")
 
-    # Accept /scrape from the configured group chat OR an authorised private DM
+    # Accept /scrape only from whitelisted users, in either the group chat or a private DM
     sender_id = msg.get("from", {}).get("id")
-    if chat_type == "private" and sender_id not in ALLOWED_USER_IDS:
+    if sender_id not in ALLOWED_USER_IDS:
         logger.warning("Ignored /scrape from unauthorised user %s", sender_id)
         return
-    if chat_type not in ("private", "group", "supergroup") or (
-        chat_type in ("group", "supergroup") and msg_chat_id != group_chat_id
-    ):
+    if chat_type in ("group", "supergroup") and msg_chat_id != group_chat_id:
         return
 
     if text.startswith("/scrape"):
