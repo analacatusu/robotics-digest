@@ -1,0 +1,40 @@
+# Secrets — NEVER commit
+.env
+
+# Runtime state — personal per-user (each runner maintains their own)
+seen.json
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Log files
+digest.log
+digest.log.*
+listener.log
+listener.log.*
+
+# Editor backup files
+*.bak
+*.orig
+*~
+
+# Test/coverage artifacts
+.pytest_cache/
+htmlcov/
+.coverage
