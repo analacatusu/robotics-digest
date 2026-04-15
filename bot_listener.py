@@ -22,6 +22,11 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
+# Comma-separated Telegram user IDs allowed to trigger /scrape via private DM.
+# Group chat access is controlled by group membership, not this list.
+_raw = os.environ.get("ALLOWED_USER_IDS", "")
+ALLOWED_USER_IDS: set[int] = {int(uid.strip()) for uid in _raw.split(",") if uid.strip()}
+
 _log_file = Path(__file__).parent / "listener.log"
 _file_handler = RotatingFileHandler(_log_file, maxBytes=500_000, backupCount=2, encoding="utf-8")
 _fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -49,7 +54,8 @@ def _get_updates(token: str, offset: int | None) -> list[dict]:
         resp.raise_for_status()
         return resp.json().get("result", [])
     except requests.RequestException as exc:
-        logger.warning("getUpdates failed: %s", exc)
+        safe = str(exc).replace(token, "<REDACTED>")
+        logger.warning("getUpdates failed: %s", safe)
         return []
 
 
@@ -65,20 +71,29 @@ def _send(token: str, chat_id: str, text: str) -> None:
         logger.warning("Failed to send acknowledgment: %s", exc)
 
 
-def _handle(update: dict, token: str, chat_id: str) -> None:
+def _handle(update: dict, token: str, group_chat_id: str) -> None:
     msg = update.get("message", {})
     text = (msg.get("text") or "").strip()
     msg_chat_id = str(msg.get("chat", {}).get("id", ""))
+    chat_type = msg.get("chat", {}).get("type", "")
 
-    if msg_chat_id != chat_id:
-        return  # ignore messages from other chats
+    # Accept /scrape from the configured group chat OR an authorised private DM
+    sender_id = msg.get("from", {}).get("id")
+    if chat_type == "private" and sender_id not in ALLOWED_USER_IDS:
+        logger.warning("Ignored /scrape from unauthorised user %s", sender_id)
+        return
+    if chat_type not in ("private", "group", "supergroup") or (
+        chat_type in ("group", "supergroup") and msg_chat_id != group_chat_id
+    ):
+        return
 
     if text.startswith("/scrape"):
-        logger.info("Received /scrape from chat %s", msg_chat_id)
-        _send(token, chat_id, "Fetching fresh articles — this takes about a minute...")
+        logger.info("Received /scrape from chat %s (%s)", msg_chat_id, chat_type)
+        _send(token, msg_chat_id, "Fetching fresh articles — this takes about a minute...")
         try:
             result = subprocess.run(
-                [sys.executable, str(Path(__file__).parent / "main.py"), "--on-demand"],
+                [sys.executable, str(Path(__file__).parent / "main.py"),
+                 "--on-demand", "--chat-id", msg_chat_id],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -86,14 +101,14 @@ def _handle(update: dict, token: str, chat_id: str) -> None:
             )
         except subprocess.TimeoutExpired:
             logger.error("/scrape timed out after 180 s")
-            _send(token, chat_id, "Scrape timed out — check listener.log for details.")
+            _send(token, msg_chat_id, "Scrape timed out — check listener.log for details.")
             return
 
         if result.returncode != 0:
             logger.error(
                 "on-demand run failed (exit %d):\n%s", result.returncode, result.stderr[:500]
             )
-            _send(token, chat_id, "Scrape failed — check digest.log for details.")
+            _send(token, msg_chat_id, "Scrape failed — check digest.log for details.")
 
 
 def main() -> None:
@@ -105,7 +120,7 @@ def main() -> None:
     if not chat_id:
         raise RuntimeError("TELEGRAM_CHAT_ID not set in .env")
 
-    logger.info("Bot listener started. Polling for /scrape in chat %s.", chat_id)
+    logger.info("Bot listener started. Polling for /scrape in group %s + private DMs.", chat_id)
 
     offset: int | None = None
     while True:

@@ -42,7 +42,7 @@ logging.basicConfig(
 logger = logging.getLogger("main")
 
 
-def run(dry_run: bool = False, force: bool = False, on_demand: bool = False) -> None:
+def run(dry_run: bool = False, force: bool = False, on_demand: bool = False, chat_id: str | None = None) -> None:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     mode = "on-demand" if on_demand else ("forced" if force else "scheduled")
     logger.info("Starting robotics digest [%s] for %s", mode, today)
@@ -63,7 +63,7 @@ def run(dry_run: bool = False, force: bool = False, on_demand: bool = False) -> 
     if not new_articles:
         logger.info("No new articles. Nothing to send.")
         if on_demand:
-            telegram_bot.send_message("No new articles since the morning digest. Check back later!")
+            telegram_bot.send_message("No new articles since the morning digest. Check back later!", chat_id=chat_id)
         return
 
     # 3. Summarize
@@ -80,7 +80,7 @@ def run(dry_run: bool = False, force: bool = False, on_demand: bool = False) -> 
         logger.info("Dry run — digest printed, not sent to Telegram.")
     else:
         logger.info("Sending to Telegram...")
-        telegram_bot.send_message(digest)
+        telegram_bot.send_message(digest, chat_id=chat_id)
         logger.info("Sent successfully.")
 
     # 5. Mark as seen (never modify state on a dry run)
@@ -96,10 +96,11 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Print digest without sending")
     parser.add_argument("--force", action="store_true", help="Ignore dedup and send all fetched articles")
     parser.add_argument("--on-demand", action="store_true", help="Send only articles not in today's morning digest")
+    parser.add_argument("--chat-id", default=None, help="Override TELEGRAM_CHAT_ID for this run (used for DM replies)")
     args = parser.parse_args()
 
     try:
-        run(dry_run=args.dry_run, force=args.force, on_demand=args.on_demand)
+        run(dry_run=args.dry_run, force=args.force, on_demand=args.on_demand, chat_id=args.chat_id)
     except Exception:
         logger.exception("Digest bot failed")
         sys.exit(1)

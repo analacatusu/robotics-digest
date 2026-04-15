@@ -10,10 +10,14 @@ logger = logging.getLogger(__name__)
 TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
 
 
-def send_message(text: str) -> None:
-    """Send text to the configured Telegram chat. Raises on failure."""
+def send_message(text: str, chat_id: str | None = None) -> None:
+    """Send text to the configured Telegram chat. Raises on failure.
+
+    If chat_id is provided it overrides TELEGRAM_CHAT_ID — used when replying
+    to a /scrape command sent in a private DM rather than the group chat.
+    """
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID")
 
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set. Check your .env file.")
