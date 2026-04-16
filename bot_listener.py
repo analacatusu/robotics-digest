@@ -12,6 +12,7 @@ setup.ps1 registers this automatically as "Robotics Digest Listener".
 import logging
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -22,6 +23,23 @@ import requests
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
+
+_TOKEN_RE = re.compile(r"bot[0-9]{8,}:[A-Za-z0-9_-]{30,}")
+
+# ── Single-instance guard ─────────────────────────────────────────────────────
+# Bind a local TCP port so a second process fails fast instead of doubling sends.
+_LOCK_PORT = 47832
+_lock_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+_lock_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+try:
+    _lock_sock.bind(("127.0.0.1", _LOCK_PORT))
+except OSError:
+    print(
+        f"bot_listener.py: another instance is already running (port {_LOCK_PORT} busy). Exiting.",
+        file=sys.stderr,
+    )
+    sys.exit(0)
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Comma-separated Telegram user IDs allowed to trigger /scrape from any chat
 # (group or private DM). Both must appear in this list.
@@ -55,8 +73,11 @@ def _get_updates(token: str, offset: int | None) -> list[dict]:
         resp.raise_for_status()
         return resp.json().get("result", [])
     except requests.RequestException as exc:
-        safe = str(exc).replace(token, "<REDACTED>")
+        safe = _TOKEN_RE.sub("bot<REDACTED>", str(exc))
         logger.warning("getUpdates failed: %s", safe)
+        # Back off on errors — 409 Conflict means another instance is running;
+        # sleeping here prevents hammering Telegram once per second.
+        time.sleep(5)
         return []
 
 
@@ -92,12 +113,23 @@ def _handle(update: dict, token: str, group_chat_id: str) -> None:
         if not re.fullmatch(r"-?\d+", msg_chat_id):
             logger.error("Unexpected chat_id format: %s — ignoring /scrape", msg_chat_id)
             return
-        logger.info("Received /scrape from chat %s (%s)", msg_chat_id, chat_type)
-        _send(token, msg_chat_id, "Fetching fresh articles — this takes about a minute...")
+
+        # /scrape --force re-fetches everything regardless of dedup
+        force = "--force" in text
+        cmd = [sys.executable, str(Path(__file__).parent / "main.py"), "--chat-id", msg_chat_id]
+        if force:
+            cmd.append("--force")
+            ack = "Re-fetching all articles (force mode) — this takes about a minute..."
+            logger.info("Received /scrape --force from chat %s (%s)", msg_chat_id, chat_type)
+        else:
+            cmd.append("--on-demand")
+            ack = "Fetching articles since the morning digest — this takes about a minute..."
+            logger.info("Received /scrape from chat %s (%s)", msg_chat_id, chat_type)
+
+        _send(token, msg_chat_id, ack)
         try:
             result = subprocess.run(
-                [sys.executable, str(Path(__file__).parent / "main.py"),
-                 "--on-demand", "--chat-id", msg_chat_id],
+                cmd,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -109,7 +141,7 @@ def _handle(update: dict, token: str, group_chat_id: str) -> None:
             return
 
         if result.returncode != 0:
-            safe_stderr = result.stderr[:500].replace(token, "<REDACTED>")
+            safe_stderr = _TOKEN_RE.sub("bot<REDACTED>", result.stderr[:500])
             logger.error("on-demand run failed (exit %d):\n%s", result.returncode, safe_stderr)
             _send(token, msg_chat_id, "Scrape failed — check digest.log for details.")
 
