@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     One-time setup for the Robotics Digest Bot on Windows.
     Run from the robotics-digest\ directory as Administrator (for Task Scheduler).
